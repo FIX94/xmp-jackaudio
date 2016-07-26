@@ -17,6 +17,7 @@ static int out_channels = 0;
 static int single_xmp_out_size = 0;
 static int full_xmp_out_size = 0;
 static int xmp_out_samples = 0;
+static int jack_autoadjust = 1;
 
 static volatile BOOL out_pause = false;
 static volatile BOOL out_writing = false;
@@ -83,7 +84,7 @@ static void updateApplyButton(HWND h)
 	memset(tmptext, 0, 64);
 	MESS(10, WM_GETTEXT, 64, tmptext);
 	if (MESS(11, TBM_GETPOS, 0, 0) != out_ringbuffers ||
-		strcmp(tmptext, serverName) != 0) {
+		strcmp(tmptext, serverName) != 0 || !MESS(13, BM_GETCHECK, 0, 0)) {
 		EnableWindow(ITEM(1000), TRUE); // enable "Apply" button
 	}
 	else
@@ -99,10 +100,11 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 			switch (LOWORD(w)) {
 				case 10: // server name switch
 				case 11: // buffers switch
+				case 13: // auto adjust switch
 				{
 					updateApplyButton(h);
 				} break;
-				case 13: // reset settings
+				case 14: // reset settings
 				{
 					memset(serverName, 0, 64);
 					memcpy(serverName, default_server, strlen(default_server));
@@ -112,6 +114,8 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 					char pos[4];
 					sprintf_s(pos, 4, "%i", out_ringbuffers);
 					MESS(12, WM_SETTEXT, 0, pos);
+					jack_autoadjust = TRUE;
+					MESS(13, BM_SETCHECK, TRUE, 0);
 					updateApplyButton(h);
 				} break;
 				case 1000: // Apply
@@ -124,6 +128,7 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 						MESS(10, WM_SETTEXT, 0, serverName);
 					}
 					out_ringbuffers = MESS(11, TBM_GETPOS, 0, 0);
+					jack_autoadjust = !!MESS(13, BM_GETCHECK, 0, 0);
 					updateApplyButton(h);
 				} break;
 				default:
@@ -163,6 +168,7 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 			char pos[2];
 			sprintf_s(pos, 2, "%u", out_ringbuffers);
 			MESS(12, WM_SETTEXT, 0, pos);
+			MESS(13, BM_SETCHECK, !!jack_autoadjust, 0);
 			updateApplyButton(h);
 		}
 		return 1;
@@ -230,20 +236,29 @@ static BOOL WINAPI OUT_Open(DWORD output, XMPOUT_FORMAT *form, HANDLE event)
 		LeaveCriticalSection(&section);
 		return false;
 	}
-	if (jack_get_sample_rate(out_client) != form->form.rate)
+
+	if (jack_autoadjust)
 	{
-		MessageBox(xmpwin, "The selected Samplerate does not match the JACK Samplerate!", plugin_name, MB_OK);
-		jack_client_close(out_client);
-		LeaveCriticalSection(&section);
-		return false;
+		form->form.rate = jack_get_sample_rate(out_client);
+		form->form.res = 4;
 	}
-	//res 4 = 32 bit
-	if (form->form.res != 4)
+	else
 	{
-		MessageBox(xmpwin, "The Audio Resolution has to be 32 bit!", plugin_name, MB_OK);
-		jack_client_close(out_client);
-		LeaveCriticalSection(&section);
-		return false;
+		if (jack_get_sample_rate(out_client) != form->form.rate)
+		{
+			MessageBox(xmpwin, "The selected Samplerate does not match the JACK Samplerate!", plugin_name, MB_OK);
+			jack_client_close(out_client);
+			LeaveCriticalSection(&section);
+			return false;
+		}
+		//res 4 = 32 bit
+		if (form->form.res != 4)
+		{
+			MessageBox(xmpwin, "The Audio Resolution has to be 32 bit!", plugin_name, MB_OK);
+			jack_client_close(out_client);
+			LeaveCriticalSection(&section);
+			return false;
+		}
 	}
 	out_channels = form->form.chan;
 	//a lot of plugins only work with the size you set
@@ -442,6 +457,9 @@ XMPOUT *WINAPI XMPOUT_GetInterface(DWORD face, InterfaceProc faceproc)
 	else {
 		memcpy(serverName, default_server, strlen(default_server));
 	}
+
+	xmpfreg->GetInt(plugin_name, "AutoAdjust", &jack_autoadjust);
+	jack_autoadjust = !!jack_autoadjust;
 	return &out;
 }
 
@@ -502,6 +520,8 @@ BOOL WINAPI DllMain(HINSTANCE hDLL, DWORD reason, LPVOID reserved)
 			if (serverName[0] != '\0') {
 				xmpfreg->SetString(plugin_name, "ServerName", serverName);
 			}
+			jack_autoadjust = !!jack_autoadjust;
+			xmpfreg->SetInt(plugin_name, "AutoAdjust", &jack_autoadjust);
 		}
 		EnterCriticalSection(&section);
 		//make sure the thread is gone
