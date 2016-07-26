@@ -84,7 +84,8 @@ static void updateApplyButton(HWND h)
 	memset(tmptext, 0, 64);
 	MESS(10, WM_GETTEXT, 64, tmptext);
 	if (MESS(11, TBM_GETPOS, 0, 0) != out_ringbuffers ||
-		strcmp(tmptext, serverName) != 0 || !MESS(13, BM_GETCHECK, 0, 0)) {
+		strcmp(tmptext, serverName) != 0 || 
+		jack_autoadjust != !!MESS(13, BM_GETCHECK, 0, 0)) {
 		EnableWindow(ITEM(1000), TRUE); // enable "Apply" button
 	}
 	else
