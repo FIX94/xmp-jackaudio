@@ -57,6 +57,20 @@ static const char *default_server = "default";
 
 //#define OutputDebugString __noop
 
+//this is to get it compiled with NODEFAULTLIB
+extern "C"
+{
+	int _fltused = 1;
+	#pragma function(memset)
+	void *memset(void *dest, int c, size_t count)
+	{
+		char *bytes = (char *)dest;
+		while (count--)
+			*bytes++ = (char)c;
+		return dest;
+	}
+}
+
 static XMPOUT out = {
     0,
 	plugin_name,
@@ -84,7 +98,7 @@ static void updateApplyButton(HWND h)
 	memset(tmptext, 0, 64);
 	MESS(10, WM_GETTEXT, 64, tmptext);
 	if (MESS(11, TBM_GETPOS, 0, 0) != out_ringbuffers ||
-		strcmp(tmptext, serverName) != 0 || 
+		lstrcmpi(tmptext, serverName) != 0 || 
 		jack_autoadjust != !!MESS(13, BM_GETCHECK, 0, 0)) {
 		EnableWindow(ITEM(1000), TRUE); // enable "Apply" button
 	}
@@ -108,12 +122,12 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 				case 14: // reset settings
 				{
 					memset(serverName, 0, 64);
-					memcpy(serverName, default_server, strlen(default_server));
+					lstrcpy(serverName, default_server);
 					MESS(10, WM_SETTEXT, 0, serverName);
 					out_ringbuffers = 2;
 					MESS(11, TBM_SETPOS, 1, 2);
-					char pos[4];
-					sprintf_s(pos, 4, "%i", out_ringbuffers);
+					char pos[32];
+					wsprintf(pos, "%i", out_ringbuffers);
 					MESS(12, WM_SETTEXT, 0, pos);
 					jack_autoadjust = TRUE;
 					MESS(13, BM_SETCHECK, TRUE, 0);
@@ -125,7 +139,7 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 					if (serverNameSize == 0) //default setting
 					{
 						memset(serverName, 0, 64);
-						memcpy(serverName, default_server, strlen(default_server));
+						lstrcpy(serverName, default_server);
 						MESS(10, WM_SETTEXT, 0, serverName);
 					}
 					out_ringbuffers = MESS(11, TBM_GETPOS, 0, 0);
@@ -142,8 +156,8 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 		{
 			case 11:
 			{ //slider got moved, update text
-				char pos[4];
-				sprintf_s(pos, 4, "%i", MESS(11, TBM_GETPOS, 0, 0));
+				char pos[32];
+				wsprintf(pos, "%i", MESS(11, TBM_GETPOS, 0, 0));
 				MESS(12, WM_SETTEXT, 0, pos);
 				updateApplyButton(h);
 			}
@@ -166,8 +180,8 @@ static BOOL CALLBACK OUT_Config(HWND h, UINT m, WPARAM w, LPARAM l)
 			MESS(10, WM_SETTEXT, 0, serverName);
 			MESS(11, TBM_SETRANGE, 1, MAKELONG(2, 8));
 			MESS(11, TBM_SETPOS, 1, out_ringbuffers);
-			char pos[2];
-			sprintf_s(pos, 2, "%u", out_ringbuffers);
+			char pos[32];
+			wsprintf(pos, "%u", out_ringbuffers);
 			MESS(12, WM_SETTEXT, 0, pos);
 			MESS(13, BM_SETCHECK, !!jack_autoadjust, 0);
 			updateApplyButton(h);
@@ -232,7 +246,7 @@ static BOOL WINAPI OUT_Open(DWORD output, XMPOUT_FORMAT *form, HANDLE event)
 	if (out_client == NULL)
 	{
 		char errorMessage[128];
-		sprintf(errorMessage, "JACK Client could not be opened (%i) !", status);
+		wsprintf(errorMessage, "JACK Client could not be opened (%i) !", status);
 		MessageBox(xmpwin, errorMessage, plugin_name, MB_OK);
 		LeaveCriticalSection(&section);
 		return false;
@@ -285,7 +299,7 @@ static BOOL WINAPI OUT_Open(DWORD output, XMPOUT_FORMAT *form, HANDLE event)
 	{
 		//simple naming pattern
 		char outName[10];
-		sprintf(outName, "out%i", i+1);
+		wsprintf(outName, "out%i", i + 1);
 		out_port[i] = jack_port_register(out_client, outName,
 			JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
 		if (out_port[i] == NULL)
@@ -449,14 +463,14 @@ XMPOUT *WINAPI XMPOUT_GetInterface(DWORD face, InterfaceProc faceproc)
 	xmpfreg->GetInt(plugin_name, "Buffers", &out_ringbuffers);
 	out_ringbuffers = max(2, min(8, out_ringbuffers));
 
-	// use config server name if possible ,else use default one
+	// use config server name if possible, else use default one
 	memset(serverName, 0, 64);
 	DWORD serverNameSize = xmpfreg->GetString(plugin_name, "ServerName", NULL, 0);
 	if (serverNameSize) {
 		xmpfreg->GetString(plugin_name, "ServerName", serverName, serverNameSize+1);
 	}
 	else {
-		memcpy(serverName, default_server, strlen(default_server));
+		lstrcpy(serverName, default_server);
 	}
 
 	xmpfreg->GetInt(plugin_name, "AutoAdjust", &jack_autoadjust);
