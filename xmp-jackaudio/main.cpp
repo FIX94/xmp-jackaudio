@@ -405,25 +405,30 @@ static BOOL WINAPI OUT_Write(const void *buf, DWORD length)
 	EnterCriticalSection(&section);
 	//make sure to set this so other threads know
 	out_writing = true;
-	int i, j;
-	//this is the length in bytes per channel
-	const int single_length = length / out_channels;
-	//this is the length of actual samples per channel
-	const int total_input = single_length / sizeof(jack_default_audio_sample_t);
-	for (i = 0; i < out_channels; i++)
-	{
-		//this little loop splits up the channels in buf
-		const jack_default_audio_sample_t *in = (const jack_default_audio_sample_t*)buf;
-		for (j = 0; j < total_input; j++)
-			jack_workbuf[j] = in[i + (out_channels*j)];
-		//after a channel got separated we can write it into the ringbuffer
-		jack_ringbuffer_write(out_buf[i], (char*)jack_workbuf, single_length);
-	}
-	LeaveCriticalSection(&section);
 	//we just wait for the last channel, no need to wait for each individual one
 	while (jack_running && jack_ringbuffer_write_space(out_buf[out_channels - 1]) < single_xmp_out_size)
-		Sleep(1); //one millisecond should be quick enough at all times
-	EnterCriticalSection(&section);
+	{
+		LeaveCriticalSection(&section);
+		Sleep(10); //10 milliseconds to not over-abuse critical sections
+		EnterCriticalSection(&section);
+	}
+	// if we are still running this means we have enough free space
+	if (jack_running) {
+		int i, j;
+		//this is the length in bytes per channel
+		const int single_length = length / out_channels;
+		//this is the length of actual samples per channel
+		const int total_input = single_length / sizeof(jack_default_audio_sample_t);
+		for (i = 0; i < out_channels; i++)
+		{
+			//this little loop splits up the channels in buf
+			const jack_default_audio_sample_t *in = (const jack_default_audio_sample_t*)buf;
+			for (j = 0; j < total_input; j++)
+				jack_workbuf[j] = in[i + (out_channels*j)];
+			//after a channel got separated we can write it into the ringbuffer
+			jack_ringbuffer_write(out_buf[i], (const char*)jack_workbuf, single_length);
+		}
+	}
 	//make sure sure to tell xmplay we are done
 	if (unfreezer) {
 		unfreezer = false;
@@ -439,7 +444,7 @@ static BOOL WINAPI OUT_Write(const void *buf, DWORD length)
 static DWORD WINAPI OUT_GetBuffered()
 {
 	EnterCriticalSection(&section);
-	//jack quit already but still go called
+	//jack quit already but still got called
 	if (!jack_running) {
 		LeaveCriticalSection(&section);
 		return 0;
